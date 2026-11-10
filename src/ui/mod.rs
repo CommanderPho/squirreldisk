@@ -17,3 +17,4 @@ pub mod macos;
 pub mod ads;
 pub mod director;
 pub mod treemap;
+pub mod blocks;

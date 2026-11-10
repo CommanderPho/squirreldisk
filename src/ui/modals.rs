@@ -350,8 +350,8 @@ impl App {
                     p.text(Pos2::new(x0, y + 12.0), Align2::LEFT_CENTER, tr("Chart style"), bold(13.5), theme.text);
                     p.text(Pos2::new(x0, y + 30.0), Align2::LEFT_CENTER, tr("Rings (sunburst) or nested boxes (treemap)"), font(11.5), theme.text_dim);
                 }
-                for (k, (value, label)) in [("sunburst", tr("Sunburst")), ("treemap", tr("Treemap"))].into_iter().enumerate() {
-                    let r = Rect::from_min_size(Pos2::new(x0 + w - 220.0 + k as f32 * 112.0, y + 6.0), Vec2::new(108.0, 32.0));
+                for (k, (value, label)) in [("sunburst", tr("Sunburst")), ("treemap", tr("Treemap")), ("blocks", tr("3D Blocks"))].into_iter().enumerate() {
+                    let r = Rect::from_min_size(Pos2::new(x0 + w - 330.0 + k as f32 * 112.0, y + 6.0), Vec2::new(108.0, 32.0));
                     let style = if s.chart_style == value { BtnStyle::Primary } else { BtnStyle::Subtle };
                     if widgets::button(ui, r, Id::new(("chart-style", k)), label, None, style, &theme).clicked() {
                         s.chart_style = value.to_string();

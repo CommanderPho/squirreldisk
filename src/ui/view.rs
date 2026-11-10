@@ -82,6 +82,8 @@ impl App {
 
         if self.settings.chart_style == "treemap" {
             self.treemap_ui(ui, chart, panel, si);
+        } else if self.settings.chart_style == "blocks" {
+            self.blocks_ui(ui, chart, panel, si);
         } else {
             self.chart_ui(ui, chart, panel, si);
         }

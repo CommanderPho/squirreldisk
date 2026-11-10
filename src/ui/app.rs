@@ -1,5 +1,6 @@
 use super::fx::{Drag, Particles, Toasts};
 use super::shader::SunburstGl;
+use super::blocks::BlocksGl;
 use super::sunburst::{Animator, View};
 use super::theme::{self, Theme};
 use super::widgets;
@@ -54,6 +55,7 @@ pub struct Session {
     pub fwd: Vec<View>,
     pub anim: Animator,
     pub treemap: super::treemap::TreemapState,
+    pub blocks: super::blocks::BlocksState,
     pub layout_sig: (u64, View, usize, i32, String),
     pub last_layout: Instant,
     pub collector: Vec<u32>,
