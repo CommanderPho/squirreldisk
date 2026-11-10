@@ -6,14 +6,14 @@
 //! occlusion, hover highlight, and collector hatching.
 
 use super::app::{App, CtxMenu, Target};
-use super::sunburst::{group_key, view_children, SegKind, View, FREE_KEY};
+use super::sunburst::{SegKind, View};
 use super::theme::{lerp_color, with_alpha, Theme};
-use super::treemap::{self, Tile};
+use super::treemap;
 use super::view::node_label;
-use super::widgets::{self, bold, cr, font, BtnStyle, Icon};
+use super::widgets::{self, bold, font};
 use crate::i18n::{tr, trf};
 use crate::sound::Sfx;
-use crate::tree::{fmt_count, fmt_size, Kind, Tree, NONE};
+use crate::tree::{fmt_count, fmt_size, Kind, Tree};
 use eframe::egui::{self, Align2, Color32, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use eframe::glow::{self, HasContext};
 use std::collections::HashMap;
@@ -150,7 +150,6 @@ pub fn layout(tree: &Tree, view: View, depth: usize, theme: &Theme, free: u64) -
             break;
         }
     }
-    ## END for t in &tiles...
 
     blocks
 }
@@ -245,7 +244,6 @@ impl BlocksState {
                 moving = true;
             }
         }
-        ## END for a in self.anims.values_mut()...
 
         self.settled = !moving;
     }
@@ -258,7 +256,8 @@ impl BlocksState {
 
 
     /// Centre of a block's top face projected to the viewport (for demo director).
-    pub fn center_of(&self, key: u64, cam: &Camera) -> Option<Pos2> {
+    pub fn center_of(&self, key: u64, viewport: Rect) -> Option<Pos2> {
+        let cam = Camera::new(viewport);
         self.anims.get(&key).filter(|a| a.alive).and_then(|a| {
             let cx = (a.x0 + a.x1) * 0.5;
             let cz = (a.z0 + a.z1) * 0.5;
@@ -543,7 +542,7 @@ const FLAG_COLLECTED: f32 = 1.0;
 const FLAG_DRAGGED: f32 = 2.0;
 
 /// Builds the projected mesh for all blocks.
-fn build_block_mesh(anims: &[&BlockAnim], cam: &Camera, tree: &Tree, root: u32, collector: &[u32], dragging_node: Option<u32>, scanning: bool, verts: &mut Vec<f32>, indices: &mut Vec<u32>) {
+fn build_block_mesh(anims: &[&BlockAnim], cam: &Camera, tree: &Tree, root: u32, collector: &[u32], dragging_node: Option<u32>, verts: &mut Vec<f32>, indices: &mut Vec<u32>) {
     verts.clear();
     indices.clear();
 
@@ -578,7 +577,7 @@ fn build_block_mesh(anims: &[&BlockAnim], cam: &Camera, tree: &Tree, root: u32, 
         }
 
         let mut flags = 0.0f32;
-        if let SegKind::Node(k) = a.block.kind {
+        if let SegKind::Node(_) = a.block.kind {
             if a.block.node != root && collector.iter().any(|c_| *c_ == a.block.node || tree.is_ancestor(*c_, a.block.node)) {
                 flags += FLAG_COLLECTED;
             }
@@ -626,13 +625,10 @@ fn build_block_mesh(anims: &[&BlockAnim], cam: &Camera, tree: &Tree, root: u32, 
             for pt in &pts {
                 verts.extend_from_slice(&[pt.x, pt.y, fc[0], fc[1], fc[2], fc[3], normal[0], normal[1], normal[2], params[0], params[1], params[2]]);
             }
-            ## END for pt in &pts...
 
             indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
-        ## END for (quad, normal) in &faces...
     }
-    ## END for &(idx, _) in &sorted...
 }
 
 
@@ -655,12 +651,10 @@ fn cpu_blocks(painter: &egui::Painter, verts: &[f32], indices: &[u32]) {
         );
         mesh.vertices.push(epaint::Vertex { pos: Pos2::new(verts[off], verts[off + 1]), uv: egui::epaint::WHITE_UV, color: c });
     }
-    ## END for i in 0..nv...
 
     for idx in indices {
         mesh.indices.push(*idx);
     }
-    ## END for idx in indices...
 
     painter.add(Shape::mesh(mesh));
 }
@@ -717,7 +711,7 @@ impl App {
         let resp = ui.interact(chart, Id::new(("blocks", si)), Sense::click_and_drag());
         let pointer = ui.ctx().input(|i| i.pointer.latest_pos());
         let hit = if !modal_open && self.drag.is_none() {
-            pointer.filter(|p| area.contains(*p)).and_then(|p| self.sessions[si].blocks.hit(*p, &cam).map(|a| a.block.clone()))
+            pointer.filter(|p| area.contains(*p)).and_then(|p| self.sessions[si].blocks.hit(p, &cam).map(|a| a.block.clone()))
         } else {
             None
         };
@@ -811,8 +805,40 @@ impl App {
         // build projected mesh
         let mut block_verts = std::mem::take(&mut s.block_verts);
         let mut block_idx = std::mem::take(&mut s.block_idx);
-        build_block_mesh(&draw, &cam, &t, root, &collector, dragging_node, s.is_scanning(), &mut block_verts, &mut block_idx);
+        build_block_mesh(&draw, &cam, &t, root, &collector, dragging_node, &mut block_verts, &mut block_idx);
+
+        let hover_label = hit.as_ref().map(|b| {
+            let label = match b.kind {
+                SegKind::Group { count, .. } => trf("{count} smaller items", &[("count", &fmt_count(count as u64))]),
+                SegKind::Free => tr("Free space").to_string(),
+                _ if t.is_alive(b.node) => node_label(&t, b.node),
+                _ => String::new(),
+            };
+            let pos = {
+                let cx = (b.x0 + b.x1) * 0.5;
+                let cz = (b.z0 + b.z1) * 0.5;
+                cam.project(cx, b.height * 0.35, cz).unwrap_or(area.center())
+            };
+            (label, b.size, pos)
+        });
         drop(t);
+
+        // ground plane under the blocks
+        {
+            let p = ui.painter();
+            if let (Some(a), Some(b), Some(c), Some(d)) = (
+                cam.project(0.0, 0.0, 0.0),
+                cam.project(1.0, 0.0, 0.0),
+                cam.project(1.0, 0.0, 1.0),
+                cam.project(0.0, 0.0, 1.0),
+            ) {
+                p.add(egui::Shape::convex_polygon(
+                    vec![a, b, c, d],
+                    with_alpha(theme.bg_bottom, 0.35),
+                    Stroke::NONE,
+                ));
+            }
+        }
 
         // render
         let screen = ui.ctx().content_rect();
@@ -832,14 +858,12 @@ impl App {
         s.block_verts = block_verts;
         s.block_idx = block_idx;
 
-        // ground plane shadow
-        {
+        if let Some((label, size, pos)) = hover_label {
             let p = ui.painter();
-            // project ground corners to give a floor reference
-            if let (Some(a), Some(b), Some(c), Some(d)) = (cam.project(0.0, 0.0, 0.0), cam.project(1.0, 0.0, 0.0), cam.project(1.0, 0.0, 1.0), cam.project(0.0, 0.0, 1.0)) {
-                let pts = vec![a, b, c, d];
-                p.add(egui::Shape::convex_polygon(pts, with_alpha(theme.bg_bottom, 0.35), Stroke::NONE));
-            }
+            let size_txt = fmt_size(size);
+            p.text(pos - Vec2::new(0.0, 18.0), Align2::CENTER_BOTTOM, size_txt, bold(14.0), theme.text);
+            let name = widgets::truncate(p, &label, &font(12.0), 180.0);
+            p.text(pos - Vec2::new(0.0, 2.0), Align2::CENTER_BOTTOM, name, font(12.0), theme.text_dim);
         }
 
         // scanning status

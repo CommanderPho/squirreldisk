@@ -57,7 +57,7 @@ pub struct Settings {
     /// Download new versions in the background; they're applied on restart.
     pub auto_install: bool,
     pub rings: usize,
-    /// "sunburst" (default) or "treemap".
+    /// "sunburst" (default), "treemap", or "blocks".
     pub chart_style: String,
     pub watch_fs: bool,
     pub ssh_history: Vec<String>,

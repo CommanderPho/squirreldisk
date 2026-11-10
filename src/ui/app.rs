@@ -73,6 +73,8 @@ pub struct Session {
     pub was_done: bool,
     pub verts: Vec<f32>,
     pub idx: Vec<u32>,
+    pub block_verts: Vec<f32>,
+    pub block_idx: Vec<u32>,
     pub watch_focus: Option<View>,
     pub expanding: Arc<AtomicBool>,
     /// Last chart geometry (used by the demo director to aim at slices).
@@ -109,6 +111,7 @@ impl Session {
             fwd: Vec::new(),
             anim: Animator::default(),
             treemap: Default::default(),
+            blocks: Default::default(),
             layout_sig: (0, root, 0, 0, String::new()),
             last_layout: Instant::now() - Duration::from_secs(1),
             collector: Vec::new(),
@@ -125,6 +128,8 @@ impl Session {
             was_done: false,
             verts: Vec::new(),
             idx: Vec::new(),
+            block_verts: Vec::new(),
+            block_idx: Vec::new(),
             watch_focus: None,
             expanding: Arc::new(AtomicBool::new(false)),
             geo: None,
@@ -296,6 +301,7 @@ pub struct App {
     pub themes: Vec<Theme>,
     pub sounds: Option<Sounds>,
     pub gl: Option<Arc<Mutex<SunburstGl>>>,
+    pub blocks_gl: Option<Arc<Mutex<BlocksGl>>>,
     pub screen: Screen,
     pub sessions: Vec<Session>,
     pub volumes: Vec<Volume>,
@@ -473,6 +479,14 @@ impl App {
         if let Some(e) = &gl_error {
             eprintln!("SquirrelDisk: falling back to CPU rendering: {e}");
         }
+        let blocks_gl = match cc.gl.as_ref().map(|gl| BlocksGl::new(gl)) {
+            Some(Ok(r)) => Some(Arc::new(Mutex::new(r))),
+            Some(Err(e)) => {
+                eprintln!("SquirrelDisk: blocks chart CPU fallback: {e}");
+                None
+            }
+            None => None,
+        };
         let rclone = Arc::new(Mutex::new(RcloneState::Looking));
         refresh_rclone(&rclone, &cc.egui_ctx);
         let updater = Updater::new();
@@ -505,6 +519,7 @@ impl App {
             theme,
             sounds: Some(Sounds::new()),
             gl,
+            blocks_gl,
             screen: Screen::Home,
             sessions: Vec::new(),
             volumes: disks::list(),
@@ -1060,7 +1075,11 @@ impl eframe::App for App {
             || !self.particles.is_empty()
             || !self.toasts.is_empty()
             || match self.screen {
-                Screen::Session(i) => self.sessions.get(i).is_some_and(|s| if self.settings.chart_style == "treemap" { !s.treemap.settled } else { !s.anim.settled }),
+                Screen::Session(i) => self.sessions.get(i).is_some_and(|s| match self.settings.chart_style.as_str() {
+                    "treemap" => !s.treemap.settled,
+                    "blocks" => !s.blocks.settled,
+                    _ => !s.anim.settled,
+                }),
                 Screen::Home => false,
                 Screen::Dupes => self.dupes.as_ref().is_some_and(|d| d.is_scanning()),
             };
@@ -1082,6 +1101,11 @@ impl eframe::App for App {
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
         self.settings.save();
         if let (Some(gl), Some(r)) = (gl, &self.gl) {
+            if let Ok(r) = r.lock() {
+                r.destroy(gl);
+            }
+        }
+        if let (Some(gl), Some(r)) = (gl, &self.blocks_gl) {
             if let Ok(r) = r.lock() {
                 r.destroy(gl);
             }

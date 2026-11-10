@@ -98,6 +98,21 @@
 			"types": "#ff5555",
 			"functions": "#ffaaaa",
 			"variables": "#f0f0f0"
+		},
+		"actionButtons": {
+			"defaultColor": "#ff3333",
+			"loadNpmCommands": false,
+			"reloadButton": null,
+			"commands": [
+				{
+					"name": "$(play) cargo run --release",
+					"color": "#ff3333",
+					"command": "cargo run --release",
+					"singleInstance": true,
+					"focus": true,
+					"tooltip": "Build and run squirreldisk in release mode"
+				}
+			]
 		}
 	}
 }

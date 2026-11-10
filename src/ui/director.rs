@@ -258,6 +258,13 @@ impl App {
                     drop(t);
                     return if exact { s.treemap.center_of(id as u64).unwrap_or(screen.center()) } else { screen.center() };
                 }
+                if self.settings.chart_style == "blocks" {
+                    let t = s.tree.read().unwrap();
+                    let (id, exact) = t.find_path(&format!("{}/{}", t.root_path.trim_end_matches('/'), rel));
+                    drop(t);
+                    let area = screen.shrink2(Vec2::new(12.0, 10.0));
+                    return if exact { s.blocks.center_of(id as u64, area).unwrap_or(screen.center()) } else { screen.center() };
+                }
                 let Some(geo) = s.geo else { return screen.center() };
                 let t = s.tree.read().unwrap();
                 let full = format!("{}/{}", t.root_path.trim_end_matches('/'), rel);

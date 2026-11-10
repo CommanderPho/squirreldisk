@@ -534,7 +534,7 @@ impl App {
             p.rect_filled(panel, cr(12.0), with_alpha(theme.surface, if theme.dark { 0.72 } else { 0.9 }));
             p.rect_stroke(panel, cr(12.0), Stroke::new(1.0, with_alpha(theme.stroke, 0.6)), egui::StrokeKind::Inside);
         }
-        let treemap_mode = self.settings.chart_style == "treemap";
+        let chart_style = self.settings.chart_style.as_str();
         let s = &self.sessions[si];
         let pv = s.panel_view;
         let selected = s.selected;
@@ -595,7 +595,11 @@ impl App {
             .iter()
             .map(|&c| {
                 let n = t.get(c);
-                let color = (if treemap_mode { s.treemap.color_of(c as u64) } else { s.anim.anims.get(&(c as u64)).map(|a| a.color) }).unwrap_or(match n.kind {
+                let color = (match chart_style {
+                    "treemap" => s.treemap.color_of(c as u64),
+                    "blocks" => s.blocks.color_of(c as u64),
+                    _ => s.anim.anims.get(&(c as u64)).map(|a| a.color),
+                }).unwrap_or(match n.kind {
                     Kind::Dir | Kind::File => theme.wheel_at(0.0),
                     _ => theme.neutral,
                 });

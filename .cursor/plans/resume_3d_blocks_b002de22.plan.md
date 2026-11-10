@@ -4,19 +4,19 @@ overview: "Finish the partially staged \"blocks\" ChartStyle so it compiles and 
 todos:
   - id: fix-blocks-rs
     content: "Remove ## END lines, fix Ordering::Equal, clean unused imports in blocks.rs"
-    status: in_progress
+    status: completed
   - id: wire-app-session
     content: Complete Session blocks/buffers init, App blocks_gl create/destroy, settle repaint
-    status: pending
+    status: completed
   - id: integration-parity
     content: Panel colors, director aim_pos/center_of(Rect), settings/modals copy
-    status: pending
+    status: completed
   - id: ux-polish
     content: Ground plane draw order + hover label overlay
-    status: pending
+    status: completed
   - id: verify-build
     content: cargo check and smoke the blocks chart style
-    status: pending
+    status: completed
 isProject: false
 ---
 
