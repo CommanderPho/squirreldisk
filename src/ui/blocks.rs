@@ -14,7 +14,7 @@ use super::widgets::{self, bold, font};
 use crate::i18n::{tr, trf};
 use crate::sound::Sfx;
 use crate::tree::{fmt_count, fmt_size, Kind, Tree};
-use eframe::egui::{self, Align2, Color32, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align2, Color32, Id, PointerButton, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use eframe::glow::{self, HasContext};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -38,12 +38,19 @@ struct Camera {
     distance: f32,
 }
 
+const DEFAULT_YAW: f32 = 0.42;
+/// Negative pitch looks down onto block tops (~47° from horizontal).
+const DEFAULT_PITCH: f32 = -0.82;
+const PITCH_MIN: f32 = -1.25;
+const PITCH_MAX: f32 = -0.20;
+const ORBIT_SENS: f32 = 0.008;
+
 impl Camera {
-    fn new(viewport: Rect) -> Self {
+    fn new(viewport: Rect, yaw: f32, pitch: f32) -> Self {
         Camera {
             viewport,
-            pitch: 0.82,   // ~47° tilt
-            yaw: 0.42,     // slight rotation so left and front faces are visible
+            pitch: pitch.clamp(PITCH_MIN, PITCH_MAX),
+            yaw,
             distance: 1.8,
         }
     }
@@ -178,13 +185,33 @@ pub struct BlockAnim {
     alive: bool,
 }
 
-#[derive(Default)]
 pub struct BlocksState {
     pub anims: HashMap<u64, BlockAnim>,
     order: Vec<u64>,
     pub sig: Option<(u64, View, usize, [i32; 4], String)>,
     pub last_layout: Option<Instant>,
     pub settled: bool,
+    /// Orbit yaw (radians).
+    pub yaw: f32,
+    /// Orbit pitch (radians, negative = looking down).
+    pub pitch: f32,
+    /// Middle-mouse orbit in progress (press position when started on empty space).
+    orbit: Option<Pos2>,
+}
+
+impl Default for BlocksState {
+    fn default() -> Self {
+        BlocksState {
+            anims: HashMap::new(),
+            order: Vec::new(),
+            sig: None,
+            last_layout: None,
+            settled: true,
+            yaw: DEFAULT_YAW,
+            pitch: DEFAULT_PITCH,
+            orbit: None,
+        }
+    }
 }
 
 impl BlocksState {
@@ -261,12 +288,16 @@ impl BlocksState {
 
     /// Centre of a block's top face projected to the viewport (for demo director).
     pub fn center_of(&self, key: u64, viewport: Rect) -> Option<Pos2> {
-        let cam = Camera::new(viewport);
+        let cam = Camera::new(viewport, self.yaw, self.pitch);
         self.anims.get(&key).filter(|a| a.alive).and_then(|a| {
             let cx = (a.x0 + a.x1) * 0.5;
             let cz = (a.z0 + a.z1) * 0.5;
             cam.project(cx, a.height * 0.35, cz)
         })
+    }
+
+    fn camera(&self, viewport: Rect) -> Camera {
+        Camera::new(viewport, self.yaw, self.pitch)
     }
 
 
@@ -675,7 +706,6 @@ impl App {
         let area = chart.shrink2(Vec2::new(12.0, 10.0));
         let modal_open = self.modal.is_some() || self.ctx_menu.is_some();
         let dragging_node = self.drag.as_ref().filter(|d| d.session == si).map(|d| d.node);
-        let cam = Camera::new(area);
 
         // free space handling (same as treemap)
         {
@@ -711,10 +741,41 @@ impl App {
             }
         }
 
+        // MMB orbit on empty space (before building the camera used for hit-tests)
+        let (middle_pressed, middle_down, middle_released, pointer_delta, pointer) = ui.ctx().input(|i| {
+            (
+                i.pointer.button_pressed(PointerButton::Middle),
+                i.pointer.button_down(PointerButton::Middle),
+                i.pointer.button_released(PointerButton::Middle),
+                i.pointer.delta(),
+                i.pointer.latest_pos(),
+            )
+        });
+        {
+            let s = &mut self.sessions[si];
+            if middle_released || !middle_down {
+                s.blocks.orbit = None;
+            } else if !modal_open && middle_pressed {
+                if let Some(p) = pointer.filter(|p| area.contains(*p)) {
+                    let cam0 = s.blocks.camera(area);
+                    let on_block = s.blocks.hit(p, &cam0).is_some();
+                    if !on_block {
+                        s.blocks.orbit = Some(p);
+                    }
+                }
+            }
+            if s.blocks.orbit.is_some() && middle_down {
+                s.blocks.yaw += pointer_delta.x * ORBIT_SENS;
+                s.blocks.pitch = (s.blocks.pitch + pointer_delta.y * ORBIT_SENS).clamp(PITCH_MIN, PITCH_MAX);
+                s.blocks.settled = false;
+            }
+        }
+        let orbiting = self.sessions[si].blocks.orbit.is_some();
+        let cam = self.sessions[si].blocks.camera(area);
+
         // interaction
         let resp = ui.interact(chart, Id::new(("blocks", si)), Sense::click_and_drag());
-        let pointer = ui.ctx().input(|i| i.pointer.latest_pos());
-        let hit = if !modal_open && self.drag.is_none() {
+        let hit = if !modal_open && self.drag.is_none() && !orbiting {
             pointer.filter(|p| area.contains(*p)).and_then(|p| self.sessions[si].blocks.hit(p, &cam).map(|a| a.block.clone()))
         } else {
             None
@@ -734,15 +795,17 @@ impl App {
                     }
                 };
                 s.selected = if b.kind != SegKind::Free { Some(b.node) } else { None };
-            } else if !in_panel && self.drag.is_none() {
+            } else if !in_panel && self.drag.is_none() && !orbiting {
                 s.panel_view = s.view;
                 s.selected = None;
             }
         }
-        if hit.is_some() {
+        if orbiting {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if hit.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        if resp.clicked() {
+        if !orbiting && resp.clicked() {
             if let Some(b) = hit.clone() {
                 match b.kind {
                     SegKind::Group { parent, skip, .. } => {
@@ -760,7 +823,7 @@ impl App {
                 self.sfx(Sfx::BlipDown);
             }
         }
-        if resp.double_clicked() {
+        if !orbiting && resp.double_clicked() {
             if let Some(b) = &hit {
                 if matches!(b.kind, SegKind::Node(Kind::File)) && self.sessions[si].source().is_local() {
                     let path = self.sessions[si].tree.read().unwrap().path(b.node);
@@ -768,14 +831,14 @@ impl App {
                 }
             }
         }
-        if resp.secondary_clicked() {
+        if !orbiting && resp.secondary_clicked() {
             if let (Some(b), Some(p)) = (&hit, pointer) {
                 if matches!(b.kind, SegKind::Node(_)) {
                     self.ctx_menu = Some(CtxMenu { session: si, node: b.node, pos: p, opened: Instant::now() });
                 }
             }
         }
-        if resp.drag_started() && self.drag.is_none() {
+        if !orbiting && resp.drag_started() && self.drag.is_none() {
             if let Some(o) = ui.ctx().input(|i| i.pointer.press_origin()) {
                 let b = self.sessions[si].blocks.hit(o, &cam).map(|a| (a.block.clone(), a.color));
                 if let Some((b, color)) = b {
@@ -787,7 +850,7 @@ impl App {
                 }
             }
         }
-        if !modal_open && self.drag.is_none() && ui.ctx().input(|i| i.key_pressed(egui::Key::Delete)) {
+        if !modal_open && !orbiting && self.drag.is_none() && ui.ctx().input(|i| i.key_pressed(egui::Key::Delete)) {
             if let Some(b) = &hit {
                 if self.sessions[si].collect(b.node) {
                     self.sfx(Sfx::Plop);
@@ -905,6 +968,21 @@ mod tests {
             assert!((-0.01..1.01).contains(&b.z0) && (-0.01..1.01).contains(&b.z1));
             assert!(b.height > 0.0);
         }
+    }
+
+    #[test]
+    fn look_down_camera_keeps_top_faces() {
+        let cam = Camera::new(Rect::from_min_size(Pos2::ZERO, Vec2::splat(800.0)), DEFAULT_YAW, DEFAULT_PITCH);
+        let h = 0.2;
+        let pts = [
+            cam.project(0.2, h, 0.2).unwrap(),
+            cam.project(0.4, h, 0.2).unwrap(),
+            cam.project(0.4, h, 0.4).unwrap(),
+            cam.project(0.2, h, 0.4).unwrap(),
+        ];
+        // Same winding test as build_block_mesh: keep faces with cross < 0.
+        let cross = (pts[1].x - pts[0].x) * (pts[2].y - pts[0].y) - (pts[1].y - pts[0].y) * (pts[2].x - pts[0].x);
+        assert!(cross < 0.0, "top face should pass back-face cull (cross={cross})");
     }
 }
 
