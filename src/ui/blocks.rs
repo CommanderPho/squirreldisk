@@ -116,10 +116,14 @@ const HEIGHT_EXP: f32 = 0.45;
 // Layout: squarified treemap → normalised blocks
 // -----------------------------------------------------------------------
 
+/// Virtual layout size in points. Treemap culls rects under 2px and areas under
+/// `MIN_AREA` (~90), so a unit square yields no tiles — only the ground plane.
+const LAYOUT_SCALE: f32 = 1000.0;
+
 pub fn layout(tree: &Tree, view: View, depth: usize, theme: &Theme, free: u64) -> Vec<Block> {
-    // Reuse the treemap layout with a unit-square area.
-    let unit = Rect::from_min_size(Pos2::ZERO, Vec2::new(1.0, 1.0));
-    let tiles = treemap::layout(tree, view, unit, depth, theme, free);
+    // Lay out in a large square, then normalise footprints to [0,1] for the camera.
+    let area = Rect::from_min_size(Pos2::ZERO, Vec2::splat(LAYOUT_SCALE));
+    let tiles = treemap::layout(tree, view, area, depth, theme, free);
     // The largest size drives height normalisation.
     let max_size = tiles.iter().filter(|t| t.depth > 0 && !t.nested).map(|t| t.size).max().unwrap_or(1).max(1);
 
@@ -137,10 +141,10 @@ pub fn layout(tree: &Tree, view: View, depth: usize, theme: &Theme, free: u64) -
             key: t.key,
             node: t.node,
             kind: t.kind,
-            x0: t.rect.left(),
-            z0: t.rect.top(),
-            x1: t.rect.right(),
-            z1: t.rect.bottom(),
+            x0: t.rect.left() / LAYOUT_SCALE,
+            z0: t.rect.top() / LAYOUT_SCALE,
+            x1: t.rect.right() / LAYOUT_SCALE,
+            z1: t.rect.bottom() / LAYOUT_SCALE,
             height: h,
             color: t.color,
             size: t.size,
@@ -876,6 +880,30 @@ impl App {
         if scanning {
             let p = ui.painter().clone();
             self.scan_pill(&p, chart, si);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree::{Kind, Source, Tree};
+
+    #[test]
+    fn layout_yields_normalised_blocks() {
+        let mut t = Tree::new("/r", "r", Source::Local);
+        let a = t.add_child(0, "a", Kind::Dir, 0, 0);
+        t.add_child_sized(a, "big", Kind::File, 300, 1);
+        t.add_child_sized(a, "small", Kind::File, 50, 1);
+        t.add_child_sized(0, "other", Kind::File, 100, 1);
+        let theme = crate::ui::theme::by_name("Hazelnut");
+        let blocks = layout(&t, View::node(0), 4, &theme, 0);
+        assert!(blocks.len() >= 2, "expected multiple blocks, got {}", blocks.len());
+        for b in &blocks {
+            assert!(b.x1 > b.x0 && b.z1 > b.z0);
+            assert!((-0.01..1.01).contains(&b.x0) && (-0.01..1.01).contains(&b.x1));
+            assert!((-0.01..1.01).contains(&b.z0) && (-0.01..1.01).contains(&b.z1));
+            assert!(b.height > 0.0);
         }
     }
 }
