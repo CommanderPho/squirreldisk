@@ -4,7 +4,7 @@ overview: "Finish the partially staged \"blocks\" ChartStyle so it compiles and 
 todos:
   - id: fix-blocks-rs
     content: "Remove ## END lines, fix Ordering::Equal, clean unused imports in blocks.rs"
-    status: pending
+    status: in_progress
   - id: wire-app-session
     content: Complete Session blocks/buffers init, App blocks_gl create/destroy, settle repaint
     status: pending
