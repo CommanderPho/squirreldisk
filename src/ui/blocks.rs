@@ -10,7 +10,7 @@ use super::sunburst::{SegKind, View};
 use super::theme::{lerp_color, with_alpha, Theme};
 use super::treemap;
 use super::view::node_label;
-use super::widgets::{self, bold, font};
+use super::widgets::{self, bold, font, EllipsisMode};
 use crate::i18n::{tr, trf};
 use crate::sound::Sfx;
 use crate::tree::{fmt_count, fmt_size, Kind, Tree};
@@ -886,7 +886,7 @@ impl App {
                 let cz = (b.z0 + b.z1) * 0.5;
                 cam.project(cx, b.height * 0.35, cz).unwrap_or(area.center())
             };
-            (label, b.size, pos)
+            (label, b.size, pos, b.key)
         });
         drop(t);
 
@@ -925,12 +925,12 @@ impl App {
         s.block_verts = block_verts;
         s.block_idx = block_idx;
 
-        if let Some((label, size, pos)) = hover_label {
+        if let Some((label, size, pos, key)) = hover_label {
             let p = ui.painter();
             let size_txt = fmt_size(size);
             p.text(pos - Vec2::new(0.0, 18.0), Align2::CENTER_BOTTOM, size_txt, bold(14.0), theme.text);
-            let name = widgets::truncate(p, &label, &font(12.0), 180.0);
-            p.text(pos - Vec2::new(0.0, 2.0), Align2::CENTER_BOTTOM, name, font(12.0), theme.text_dim);
+            let name_rect = Rect::from_center_size(pos - Vec2::new(0.0, 10.0), Vec2::new(180.0, 16.0));
+            widgets::marquee_text(ui, name_rect, Id::new(("blocks-hover-mq", si, key)), &label, font(12.0), theme.text_dim, Align2::CENTER_CENTER, EllipsisMode::Filename, true);
         }
 
         // scanning status

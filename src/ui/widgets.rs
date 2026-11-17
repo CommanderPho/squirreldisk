@@ -372,6 +372,186 @@ pub fn truncate(painter: &Painter, text: &str, font: &FontId, max_w: f32) -> Str
     chars[..lo].iter().collect::<String>() + "\u{2026}"
 }
 
+/// Keeps the start and the end: `/Volumes/T7/…/Shoot/footage`.
+pub fn truncate_middle(painter: &Painter, text: &str, font: &FontId, max_w: f32) -> String {
+    let w = |s: &str| painter.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x;
+    if w(text) <= max_w {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let cut = |keep: usize| -> String {
+        let head = keep * 2 / 5;
+        let tail = keep - head;
+        chars[..head].iter().collect::<String>() + "\u{2026}" + &chars[chars.len() - tail..].iter().collect::<String>()
+    };
+    let (mut lo, mut hi) = (0usize, chars.len());
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if w(&cut(mid)) <= max_w {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    cut(lo)
+}
+
+/// Middle-ellipsis for a filename, preferring to keep a short file extension in the tail.
+pub fn truncate_filename(painter: &Painter, text: &str, font: &FontId, max_w: f32) -> String {
+    let w = |s: &str| painter.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x;
+    if w(text) <= max_w {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let ext_tail = filename_ext_tail(&chars);
+    let cut = |keep: usize| -> String {
+        if keep == 0 {
+            return "\u{2026}".to_string();
+        }
+        let mut tail = (keep - keep * 2 / 5).max(1);
+        let mut head = keep.saturating_sub(tail);
+        if let Some(ext_len) = ext_tail {
+            if ext_len < keep {
+                tail = tail.max(ext_len).min(keep - 1);
+                head = keep - tail;
+            }
+        }
+        chars[..head].iter().collect::<String>() + "\u{2026}" + &chars[chars.len() - tail..].iter().collect::<String>()
+    };
+    let (mut lo, mut hi) = (0usize, chars.len());
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if w(&cut(mid)) <= max_w {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    cut(lo)
+}
+
+fn filename_ext_tail(chars: &[char]) -> Option<usize> {
+    if chars.iter().any(|&c| c == '/' || c == '\\') {
+        return None;
+    }
+    let dot = chars.iter().rposition(|&c| c == '.')?;
+    if dot == 0 || dot + 1 >= chars.len() {
+        return None;
+    }
+    let ext_len = chars.len() - (dot + 1);
+    if ext_len == 0 || ext_len > 8 {
+        return None;
+    }
+    if !chars[dot + 1..].iter().all(|c| c.is_ascii_alphanumeric()) {
+        return None;
+    }
+    // Keep "….ext" (ellipsis is separate); return char count of ".ext" + a little stem.
+    Some((chars.len() - dot).min(chars.len().saturating_sub(1)))
+}
+
+/// How idle truncation chooses which ends to keep.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EllipsisMode {
+    Filename,
+    Path,
+}
+
+/// Draw a single-line label that middle-ellides when too wide, and scrolls (marquee) on hover.
+pub fn marquee_text(
+    ui: &Ui,
+    rect: Rect,
+    id: Id,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    align: Align2,
+    mode: EllipsisMode,
+    hovered: bool,
+) {
+    if text.is_empty() || rect.width() <= 1.0 {
+        return;
+    }
+    let painter = ui.painter();
+    let full = painter.layout_no_wrap(text.to_string(), font.clone(), color);
+    let full_w = full.size().x;
+    let max_w = rect.width();
+
+    if !hovered {
+        ui.ctx().data_mut(|d| {
+            d.remove_temp::<f64>(id.with("marquee_t0"));
+        });
+    }
+
+    if full_w <= max_w + 0.5 {
+        let pos = match (align.x(), align.y()) {
+            (egui::Align::Min, egui::Align::Min) => rect.left_top(),
+            (egui::Align::Min, egui::Align::Center) => Pos2::new(rect.left(), rect.center().y),
+            (egui::Align::Min, egui::Align::Max) => rect.left_bottom(),
+            (egui::Align::Center, egui::Align::Min) => Pos2::new(rect.center().x, rect.top()),
+            (egui::Align::Center, egui::Align::Center) => rect.center(),
+            (egui::Align::Center, egui::Align::Max) => Pos2::new(rect.center().x, rect.bottom()),
+            (egui::Align::Max, egui::Align::Min) => rect.right_top(),
+            (egui::Align::Max, egui::Align::Center) => Pos2::new(rect.right(), rect.center().y),
+            (egui::Align::Max, egui::Align::Max) => rect.right_bottom(),
+        };
+        painter.text(pos, align, text, font, color);
+        return;
+    }
+
+    let clip = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
+    if !hovered {
+        let shown = match mode {
+            EllipsisMode::Filename => truncate_filename(&clip, text, &font, max_w),
+            EllipsisMode::Path => truncate_middle(&clip, text, &font, max_w),
+        };
+        let pos = match (align.x(), align.y()) {
+            (egui::Align::Min, _) => Pos2::new(rect.left(), align_y(rect, align)),
+            (egui::Align::Center, _) => Pos2::new(rect.center().x, align_y(rect, align)),
+            (egui::Align::Max, _) => Pos2::new(rect.right(), align_y(rect, align)),
+        };
+        let a = Align2([align.x(), align.y()]);
+        clip.text(pos, a, shown, font, color);
+        return;
+    }
+
+    // Marquee: pause at start, scroll left, pause at end, loop.
+    // Offset resets when this `id` becomes hovered again.
+    const SPEED: f32 = 50.0;
+    const PAUSE: f64 = 0.4;
+    let now = ui.input(|i| i.time);
+    let start = ui.ctx().data_mut(|d| {
+        let key = id.with("marquee_t0");
+        *d.get_temp_mut_or_insert_with(key, || now)
+    });
+    let overflow = (full_w - max_w).max(0.0);
+    let scroll_secs = (overflow / SPEED) as f64;
+    let cycle = (PAUSE + scroll_secs + PAUSE).max(0.01);
+    let phase = (now - start).max(0.0) % cycle;
+    let offset = if phase < PAUSE {
+        0.0
+    } else if phase < PAUSE + scroll_secs {
+        ((phase - PAUSE) as f32) * SPEED
+    } else {
+        overflow
+    };
+    ui.ctx().request_repaint();
+
+    let y = match align.y() {
+        egui::Align::Min => rect.top(),
+        egui::Align::Center => rect.center().y - full.size().y * 0.5,
+        egui::Align::Max => rect.bottom() - full.size().y,
+    };
+    clip.galley(Pos2::new(rect.left() - offset, y), full, color);
+}
+
+fn align_y(rect: Rect, align: Align2) -> f32 {
+    match align.y() {
+        egui::Align::Min => rect.top(),
+        egui::Align::Center => rect.center().y,
+        egui::Align::Max => rect.bottom(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Vector icons
 

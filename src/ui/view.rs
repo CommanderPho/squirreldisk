@@ -5,7 +5,7 @@ use super::fx::Drag;
 use super::shader;
 use super::sunburst::{self, Geometry, SegKind, SegStyle, View};
 use super::theme::{lerp_color, lighten, with_alpha, Theme};
-use super::widgets::{self, bold, cr, display, font, BtnStyle, Icon};
+use super::widgets::{self, bold, cr, display, font, BtnStyle, EllipsisMode, Icon};
 use crate::i18n::{tr, tr_status, trf};
 use crate::safety::{Os, Rules};
 use crate::scan::local::expand_small;
@@ -416,8 +416,13 @@ impl App {
         let g = p.layout_no_wrap(size_txt.clone(), display(fs), theme.text);
         let fs = if g.size().x > r0 * 1.7 { fs * r0 * 1.7 / g.size().x } else { fs };
         p.text(geo.center - Vec2::new(0.0, fs * 0.22), Align2::CENTER_CENTER, size_txt, display(fs), theme.text);
-        let name = widgets::truncate(p, &title, &font(12.0), r0 * 1.6);
-        p.text(geo.center + Vec2::new(0.0, fs * 0.55), Align2::CENTER_CENTER, name, font(12.0), theme.text_dim);
+        let name_w = (r0 * 1.6).max(20.0);
+        let name_rect = Rect::from_center_size(geo.center + Vec2::new(0.0, fs * 0.55), Vec2::new(name_w, 18.0));
+        let center_hover = ui.ctx().input(|i| i.pointer.latest_pos()).is_some_and(|pos| {
+            let d = (pos - geo.center).length();
+            d <= r0
+        });
+        widgets::marquee_text(ui, name_rect, Id::new(("sun-center-mq", si, &title)), &title, font(12.0), theme.text_dim, Align2::CENTER_CENTER, EllipsisMode::Filename, center_hover);
 
         // --- scan status
         let s = &self.sessions[si];
@@ -556,10 +561,11 @@ impl App {
         let p = ui.painter().clone();
         let size_txt = fmt_size(total);
         let sg = p.layout_no_wrap(size_txt.clone(), display(20.0), theme.text);
-        let tw = inner.width() - sg.size().x - 14.0;
-        let tt = widgets::truncate(&p, &title, &display(18.0), tw);
-        p.text(inner.left_top() + Vec2::new(0.0, 2.0), Align2::LEFT_TOP, tt, display(20.0), theme.text);
-        p.galley(Pos2::new(inner.right() - sg.size().x, inner.top() + 1.0), sg, theme.text);
+        let tw = (inner.width() - sg.size().x - 14.0).max(20.0);
+        let header_rect = Rect::from_min_size(inner.left_top() + Vec2::new(0.0, 2.0), Vec2::new(tw, 24.0));
+        let header_hover = ui.interact(header_rect, Id::new(("panel-title", si)), Sense::hover()).hovered();
+        widgets::marquee_text(ui, header_rect, Id::new(("panel-title-mq", si)), &title, display(18.0), theme.text, Align2::LEFT_CENTER, EllipsisMode::Filename, header_hover);
+        ui.painter().galley(Pos2::new(inner.right() - sg.size().x, inner.top() + 1.0), sg, theme.text);
         // live counts change fast: keep them compact until the scan is done
         let count = |n: u64| if s.is_scanning() { crate::tree::fmt_count_compact(n) } else { fmt_count(n) };
         let sub = trf("{files} files · {items} items", &[("files", &count(files as u64)), ("items", &count(kids.len() as u64))]);
@@ -647,9 +653,11 @@ impl App {
             let tc = if r.collected { theme.text_faint } else if matches!(r.kind, Kind::SmallFiles | Kind::Hidden | Kind::Mount) { theme.text_dim } else { theme.text };
             let sz = fmt_size(r.size);
             let sw = p.layout_no_wrap(sz.clone(), bold(12.5), theme.text).size().x;
-            let lw = rr.width() - 44.0 - sw - 12.0 - if r.denied { 60.0 } else { 0.0 };
-            let lbl = widgets::truncate(p, &r.label, &font(13.0), lw);
-            p.text(Pos2::new(rr.left() + 30.0, rr.center().y - 1.0), Align2::LEFT_CENTER, lbl, font(13.0), tc);
+            let right_pad = 12.0 + sw + if r.denied { 60.0 } else if r.collected { 22.0 } else { 0.0 };
+            let lw = (rr.width() - 44.0 - right_pad).max(20.0);
+            let label_rect = Rect::from_min_size(Pos2::new(rr.left() + 30.0, rr.top()), Vec2::new(lw, rr.height()));
+            widgets::marquee_text(ui, label_rect, id.with("mq"), &r.label, font(13.0), tc, Align2::LEFT_CENTER, EllipsisMode::Filename, resp.hovered());
+            let p = ui.painter();
             if r.denied {
                 p.text(Pos2::new(rr.right() - 16.0 - sw - 10.0, rr.center().y - 1.0), Align2::RIGHT_CENTER, tr("no access"), font(11.0), theme.warn);
             }
@@ -703,8 +711,9 @@ impl App {
                 p.text(Pos2::new(inner.right() - 4.0, fy + 34.0), Align2::RIGHT_CENTER, fmt_size(free + collected), bold(12.5), theme.ok);
             }
         } else if let Some(path) = hovered_path {
-            let pth = widgets::truncate(p, &path, &font(11.0), inner.width());
-            p.text(Pos2::new(inner.left(), fy + 8.0), Align2::LEFT_CENTER, pth, font(11.0), theme.text_faint);
+            let path_rect = Rect::from_min_size(Pos2::new(inner.left(), fy), Vec2::new(inner.width(), 20.0));
+            let path_hover = ui.interact(path_rect, Id::new(("panel-path", si)), Sense::hover()).hovered();
+            widgets::marquee_text(ui, path_rect, Id::new(("panel-path-mq", si, &path)), &path, font(11.0), theme.text_faint, Align2::LEFT_CENTER, EllipsisMode::Path, path_hover);
         }
 
         let s = &mut self.sessions[si];

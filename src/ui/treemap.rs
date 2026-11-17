@@ -6,7 +6,7 @@ use super::app::{App, CtxMenu, Target};
 use super::sunburst::{group_key, view_children, SegKind, View, FREE_KEY};
 use super::theme::{lerp_color, lighten, with_alpha, Theme};
 use super::view::node_label;
-use super::widgets::{self, bold, cr, font};
+use super::widgets::{self, bold, cr, font, EllipsisMode};
 use crate::i18n::{tr, trf};
 use crate::sound::Sfx;
 use crate::tree::{fmt_count, fmt_size, Kind, Tree, NONE};
@@ -489,18 +489,23 @@ impl App {
             let text_col = if theme.dark || a.tile.nested { theme.text } else { Color32::from_rgb(0x1a, 0x12, 0x27) };
             let tc = with_alpha(if a.tile.nested { theme.text } else { contrast_text(fill, text_col) }, a.alpha);
             let lp = p.with_clip_rect(r.intersect(area));
+            let tile_hovered = a.hover > 0.5;
             if a.tile.nested {
                 if r.width() > 40.0 {
                     let size = fmt_size(a.tile.size);
                     let sw = lp.layout_no_wrap(size.clone(), font(10.5), tc).size().x;
-                    let name = widgets::truncate(&lp, &label, &bold(11.0), r.width() - sw - 18.0);
-                    lp.text(Pos2::new(r.left() + 5.0, r.top() + HEADER / 2.0), Align2::LEFT_CENTER, name, bold(11.0), tc);
+                    let name_w = (r.width() - sw - 18.0).max(20.0);
+                    let name_rect = Rect::from_min_size(Pos2::new(r.left() + 5.0, r.top()), Vec2::new(name_w, HEADER));
+                    widgets::marquee_text(ui, name_rect, Id::new(("tm-mq", si, a.tile.key)), &label, bold(11.0), tc, Align2::LEFT_CENTER, EllipsisMode::Filename, tile_hovered);
+                    let lp = ui.painter().with_clip_rect(r.intersect(area));
                     lp.text(Pos2::new(r.right() - 5.0, r.top() + HEADER / 2.0), Align2::RIGHT_CENTER, size, font(10.5), with_alpha(tc, 0.75 * a.alpha));
                 }
             } else if r.width() > 46.0 && r.height() > 22.0 {
-                let name = widgets::truncate(&lp, &label, &bold(11.5), r.width() - 10.0);
-                lp.text(Pos2::new(r.left() + 5.0, r.top() + 5.0), Align2::LEFT_TOP, name, bold(11.5), tc);
+                let name_w = (r.width() - 10.0).max(20.0);
+                let name_rect = Rect::from_min_size(Pos2::new(r.left() + 5.0, r.top() + 5.0), Vec2::new(name_w, 16.0));
+                widgets::marquee_text(ui, name_rect, Id::new(("tm-mq", si, a.tile.key)), &label, bold(11.5), tc, Align2::LEFT_CENTER, EllipsisMode::Filename, tile_hovered);
                 if r.height() > 38.0 {
+                    let lp = ui.painter().with_clip_rect(r.intersect(area));
                     lp.text(Pos2::new(r.left() + 5.0, r.top() + 21.0), Align2::LEFT_TOP, fmt_size(a.tile.size), font(10.5), with_alpha(tc, 0.75 * a.alpha));
                 }
             }

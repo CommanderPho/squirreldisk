@@ -1267,7 +1267,7 @@ impl App {
                     let date = fmt_date(c.modified);
                     let dw = lp.layout_no_wrap(date.clone(), font(11.5), theme.text).size().x;
                     let shown = DupesUi::shown(c, &g.name);
-                    let path = truncate_middle(&lp, &shown, &font(12.5), rr.right() - 16.0 - dw - 20.0 - x);
+                    let path = widgets::truncate_middle(&lp, &shown, &font(12.5), rr.right() - 16.0 - dw - 20.0 - x);
                     if resp.hovered() {
                         resp.clone().on_hover_text(&c.path);
                     }
@@ -1796,7 +1796,7 @@ fn dupes_preview(ui: &mut Ui, panel: Rect, d: &mut DupesUi, theme: &Theme) {
         let mut path_g = p.layout(c.path.clone(), font(11.5), theme.text_dim, room);
         if path_g.rows.len() > 3 {
             // very deep paths: keep the start and the end, on three lines at most
-            let short = truncate_middle(&p, &c.path, &font(11.5), room * 2.7);
+            let short = widgets::truncate_middle(&p, &c.path, &font(11.5), room * 2.7);
             path_g = p.layout(short, font(11.5), theme.text_dim, room);
         }
         let row_h = 30.0 + path_g.size().y + 10.0;
@@ -1996,30 +1996,6 @@ fn fit_label(p: &Painter, text: &str, max_w: f32, size: f32, min: f32) -> (Strin
         s -= 0.5;
     }
     (widgets::truncate(p, text, &bold(s), max_w), bold(s))
-}
-
-/// Keeps the start and the end of a path: `/Volumes/T7/…/Shoot/footage`.
-fn truncate_middle(p: &Painter, text: &str, font: &egui::FontId, max_w: f32) -> String {
-    let w = |s: &str| p.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE).size().x;
-    if w(text) <= max_w {
-        return text.to_string();
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let cut = |keep: usize| -> String {
-        let head = keep * 2 / 5;
-        let tail = keep - head;
-        chars[..head].iter().collect::<String>() + "\u{2026}" + &chars[chars.len() - tail..].iter().collect::<String>()
-    };
-    let (mut lo, mut hi) = (0usize, chars.len());
-    while lo < hi {
-        let mid = (lo + hi).div_ceil(2);
-        if w(&cut(mid)) <= max_w {
-            lo = mid;
-        } else {
-            hi = mid - 1;
-        }
-    }
-    cut(lo)
 }
 
 fn fmt_date((y, m, d): (u16, u8, u8)) -> String {
